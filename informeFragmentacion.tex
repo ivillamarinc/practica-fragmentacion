@@ -1,0 +1,267 @@
+\documentclass[conference]{IEEEtran}
+\IEEEoverridecommandlockouts
+
+\usepackage{graphicx}
+\usepackage{cite}
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage{url}
+\usepackage{hyperref}
+\usepackage{listings}
+\usepackage{xcolor}
+\usepackage{makecell}
+
+\lstset{
+  basicstyle=\ttfamily\footnotesize,
+  breaklines=true,
+  columns=fullflexible,
+  backgroundcolor=\color{gray!10},
+  frame=single
+}
+
+\hypersetup{
+  colorlinks=true,
+  linkcolor=blue,
+  urlcolor=blue,
+  citecolor=blue
+}
+
+\title{Diseño y Fragmentación de una Base de Datos Distribuida con PostgreSQL y Docker}
+
+\author{
+\IEEEauthorblockN{Ivan Andres Villamarin}
+\IEEEauthorblockA{
+Aplicaciones Distribuidas\\
+Universidad Técnica Estatal de Quevedo\\
+Quevedo, Ecuador}
+}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+Este informe describe el diseño e implementación de una base de datos distribuida para un escenario académico de una cafetería universitaria con tres sedes: Campus, Babahoyo y Ventanas. Utilizando PostgreSQL 16 sobre contenedores Docker, se aplicaron técnicas de fragmentación horizontal, vertical y mixta sobre una base de datos centralizada, y se reconstruyó la información distribuida mediante vistas globales creadas con la extensión \texttt{postgres\_fdw}. Los resultados de verificación confirman el cumplimiento de las propiedades de completitud, reconstrucción y disjunción, validando la correcta aplicación del diseño distribuido.
+\end{abstract}
+
+\begin{IEEEkeywords}
+bases de datos distribuidas, fragmentación horizontal, fragmentación vertical, fragmentación mixta, PostgreSQL, Docker, postgres\_fdw
+\end{IEEEkeywords}
+
+\section{Introducción}
+La presente práctica tiene como finalidad aplicar el diseño y la fragmentación de una base de datos distribuida utilizando PostgreSQL en contenedores Docker. Para el desarrollo se trabajó con un escenario académico basado en una cafetería universitaria que cuenta con tres sedes: Campus, Babahoyo y Ventanas.
+
+El objetivo principal fue dividir la información de una base de datos centralizada en varios nodos independientes, aplicando fragmentación horizontal, fragmentación vertical y fragmentación mixta. Además, se implementaron vistas globales mediante \texttt{postgres\_fdw} para reconstruir la información distribuida y comprobar que los datos pueden consultarse nuevamente como si estuvieran en una sola base de datos.
+
+Esta práctica permite comprender de forma sencilla cómo una base de datos distribuida puede mejorar la organización de los datos, distribuir la carga entre varios nodos y mantener la posibilidad de reconstruir la información original mediante consultas SQL.
+
+\section{Objetivos}
+
+\subsection{Objetivo general}
+Implementar una base de datos distribuida en PostgreSQL mediante contenedores Docker, aplicando fragmentación horizontal, vertical y mixta, y verificando la reconstrucción de los datos mediante vistas globales.
+
+\subsection{Objetivos específicos}
+\begin{itemize}
+    \item Crear un entorno distribuido con tres nodos PostgreSQL usando Docker Compose.
+    \item Diseñar una base de datos centralizada para una cafetería universitaria.
+    \item Aplicar fragmentación horizontal sobre la tabla \texttt{pedidos}.
+    \item Aplicar fragmentación vertical sobre la tabla \texttt{clientes}.
+    \item Aplicar fragmentación mixta combinando criterios de ciudad y tipo de dato.
+    \item Crear vistas globales usando \texttt{postgres\_fdw}.
+    \item Verificar las condiciones de completitud, reconstrucción y disjunción.
+\end{itemize}
+
+\section{Entorno de Trabajo}
+Para el desarrollo de la práctica se utilizaron las siguientes herramientas:
+\begin{itemize}
+    \item Visual Studio Code como editor de código.
+    \item Docker Desktop para ejecutar los contenedores.
+    \item Docker Compose para definir y levantar los servicios.
+    \item PostgreSQL 16 como sistema gestor de base de datos.
+    \item PowerShell como terminal de ejecución.
+    \item \texttt{postgres\_fdw} como extensión para conectar tablas remotas.
+\end{itemize}
+
+La estructura del proyecto fue la siguiente:
+
+\begin{lstlisting}
+practica-fragmentacion/
+ docker-compose.yml
+ README.md
+ sql/
+   01_esquema_central.sql
+   02_datos.sql
+   03_fragmentacion_horizontal.sql
+   04_fragmentacion_vertical.sql
+   05_fragmentacion_mixta.sql
+   06_vistas_globales.sql
+   07_verificacion.sql
+\end{lstlisting}
+
+Se configuraron tres contenedores PostgreSQL, cada uno representando una sede diferente: \texttt{pg-campus} (sede Campus), \texttt{pg-babahoyo} (sede Babahoyo) y \texttt{pg-ventanas} (sede Ventanas). Cada nodo trabaja como una instancia independiente de PostgreSQL, lo que permite simular una base de datos distribuida sobre una sola computadora.
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=\columnwidth]{figs/fig_directorio.jpg}
+\caption{Estructura del proyecto en Visual Studio Code, mostrando los scripts SQL y el archivo \texttt{docker-compose.yml}.}
+\label{fig:directorio}
+\end{figure}
+
+\section{Diseño de la Base de Datos Centralizada}
+Antes de aplicar la fragmentación, se creó una base de datos centralizada llamada \texttt{cafeteria}. Esta base contiene tres tablas principales: \texttt{clientes}, \texttt{productos} y \texttt{pedidos}.
+
+La tabla \texttt{clientes} almacena los datos de los estudiantes o usuarios registrados en la cafetería. Sus atributos son \texttt{cliente\_id}, \texttt{nombre}, \texttt{ciudad}, \texttt{email} y \texttt{telefono}.
+
+La tabla \texttt{productos} registra los productos disponibles, como café, sánduches, jugos y empanadas. Sus atributos son \texttt{producto\_id}, \texttt{nombre}, \texttt{categoria} y \texttt{precio}.
+
+La tabla \texttt{pedidos} representa las compras realizadas por los clientes. Esta tabla se relaciona con \texttt{clientes} y \texttt{productos} mediante claves foráneas. Sus atributos son \texttt{pedido\_id}, \texttt{cliente\_id}, \texttt{producto\_id}, \texttt{fecha}, \texttt{monto} y \texttt{sede}.
+
+El modelo utilizado permite representar una relación donde un cliente puede realizar varios pedidos y cada pedido pertenece a un producto. La columna \texttt{sede} fue fundamental para realizar la fragmentación horizontal, ya que permite identificar en qué sede se generó cada pedido.
+
+\section{Fragmentación Horizontal}
+La fragmentación horizontal consiste en dividir una tabla por filas. En esta práctica se aplicó sobre la tabla \texttt{pedidos}, usando como criterio la columna \texttt{sede}.
+
+Cada nodo almacena solamente los pedidos que corresponden a su sede: el nodo \texttt{pg-campus} almacena los pedidos de la sede Campus, el nodo \texttt{pg-babahoyo} almacena los pedidos de la sede Babahoyo, y el nodo \texttt{pg-ventanas} almacena los pedidos de la sede Ventanas.
+
+\begin{table}[htbp]
+\caption{Resultados de la fragmentación horizontal}
+\label{tab:horizontal}
+\centering
+\begin{tabular}{@{}lcc@{}}
+\toprule
+\textbf{Nodo} & \textbf{Sede} & \textbf{N.º de pedidos} \\
+\midrule
+pg-campus    & campus    & 3 \\
+pg-babahoyo  & babahoyo  & 3 \\
+pg-ventanas  & ventanas  & 2 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Esta fragmentación es correcta porque cada pedido pertenece a una sola sede. Por lo tanto, no existen pedidos duplicados entre los nodos. Además, al unir los fragmentos de los tres nodos se obtiene nuevamente el total de 8 pedidos originales.
+
+La fragmentación horizontal permite distribuir la carga de datos entre varias sedes. En un sistema real, esto podría ayudar a que cada sede consulte sus propios pedidos sin depender totalmente de un servidor central.
+
+\section{Fragmentación Vertical}
+La fragmentación vertical consiste en dividir una tabla por columnas. En esta práctica se aplicó sobre la tabla \texttt{clientes}, que fue separada en dos partes: \texttt{clientes\_publicos}, que contiene \texttt{cliente\_id}, \texttt{nombre} y \texttt{ciudad}; y \texttt{clientes\_contacto}, que contiene \texttt{cliente\_id}, \texttt{email} y \texttt{telefono}.
+
+\begin{table}[htbp]
+\caption{Resultados de la fragmentación vertical}
+\label{tab:vertical}
+\centering
+\begin{tabular}{@{}lll@{}}
+\toprule
+\textbf{Nodo} & \textbf{Tabla} & \textbf{Contenido} \\
+\midrule
+pg-campus   & clientes\_publicos & Datos generales del cliente \\
+pg-babahoyo & clientes\_contacto & Datos de contacto del cliente \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+La clave primaria \texttt{cliente\_id} se conserva en ambos fragmentos. Esto es necesario porque permite reconstruir la tabla original mediante una operación \texttt{JOIN}.
+
+Esta fragmentación puede ser útil cuando se desea separar información pública de información sensible. Por ejemplo, el nombre y la ciudad pueden estar disponibles para consultas generales, mientras que el correo y el teléfono pueden protegerse en otro nodo con mayor control de acceso.
+
+\section{Fragmentación Mixta}
+La fragmentación mixta combina fragmentación horizontal y vertical. En esta práctica se aplicó sobre los datos de clientes. Primero se separaron los clientes según la ciudad y luego se separaron los datos según su tipo, obteniendo los siguientes fragmentos.
+
+\begin{table}[htbp]
+\caption{Resultados de la fragmentación mixta}
+\label{tab:mixta}
+\centering
+\begin{tabular}{@{}lll@{}}
+\toprule
+\textbf{Nodo} & \textbf{Tabla} & \textbf{Contenido} \\
+\midrule
+pg-campus & \makecell[l]{clientes\_quevedo\_\\publicos} & Clientes de Quevedo con datos públicos \\
+pg-babahoyo & \makecell[l]{clientes\_contacto\_\\mixto} & Datos de contacto de todos los clientes \\
+pg-ventanas & \makecell[l]{clientes\_otros\_\\publicos} & Clientes de Babahoyo y Ventanas con datos públicos \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+El nodo \texttt{pg-campus} almacena los datos públicos de los clientes de Quevedo. El nodo \texttt{pg-ventanas} almacena los datos públicos de los clientes de Babahoyo y Ventanas. El nodo \texttt{pg-babahoyo} almacena los datos de contacto de todos los clientes.
+
+Esta fragmentación demuestra que en un sistema distribuido se pueden combinar varios criterios de división. Por un lado, se puede distribuir la información por ubicación geográfica, y por otro lado, se puede separar la información sensible de la información general.
+
+\section{Vistas Globales con postgres\_fdw}
+Para reconstruir los datos distribuidos se utilizó la extensión \texttt{postgres\_fdw} de PostgreSQL. Esta extensión permite que un nodo consulte tablas ubicadas en otros nodos como si fueran tablas locales.
+
+La configuración se realizó desde el nodo \texttt{pg-campus}. Desde este nodo se crearon conexiones hacia \texttt{pg-babahoyo} y \texttt{pg-ventanas}. Se crearon dos vistas globales principales: \texttt{pedidos\_global} y \texttt{clientes\_global}.
+
+La vista \texttt{pedidos\_global} reconstruye los pedidos de los tres nodos mediante \texttt{UNION ALL}, uniendo los pedidos almacenados en \texttt{pg-campus}, \texttt{pg-babahoyo} y \texttt{pg-ventanas}.
+
+La vista \texttt{clientes\_global} reconstruye los datos completos de los clientes mediante \texttt{JOIN}, utilizando \texttt{cliente\_id} como clave de unión entre \texttt{clientes\_publicos} y \texttt{clientes\_contacto}.
+
+Los resultados principales fueron: la vista \texttt{pedidos\_global} mostró 8 pedidos, la vista \texttt{clientes\_global} mostró 6 clientes completos, y la consulta de total por sede devolvió los valores correctos.
+
+Esto demuestra que, aunque los datos están distribuidos físicamente en varios contenedores, pueden ser consultados de manera integrada mediante vistas globales.
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=\columnwidth]{figs/fig_pedidos_global.png}
+\caption{Consulta \texttt{SELECT * FROM pedidos\_global} mostrando los 8 pedidos reconstruidos de las tres sedes.}
+\label{fig:pedidos_global}
+\end{figure}
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=\columnwidth]{figs/fig_clientes_global.png}
+\caption{Consulta \texttt{SELECT * FROM clientes\_global} mostrando los 6 clientes reconstruidos mediante \texttt{JOIN}.}
+\label{fig:clientes_global}
+\end{figure}
+
+\section{Verificación de Resultados}
+Para comprobar que la fragmentación fue correcta, se aplicaron tres condiciones principales: completitud, reconstrucción y disjunción.
+
+\subsection{Completitud}
+La completitud significa que ningún dato debe perderse durante la fragmentación. Para comprobarlo, se contó el número de filas en la vista \texttt{pedidos\_global}, obteniendo un resultado de \texttt{filas\_globales = 8}. Este resultado confirma que los 8 pedidos originales se encuentran distribuidos entre los tres nodos.
+
+\subsection{Reconstrucción}
+La reconstrucción significa que la información original puede volver a obtenerse a partir de los fragmentos. Para verificarlo, se consultó el total vendido por sede desde la vista \texttt{pedidos\_global}.
+
+\begin{table}[htbp]
+\caption{Total vendido por sede}
+\label{tab:reconstruccion}
+\centering
+\begin{tabular}{@{}lc@{}}
+\toprule
+\textbf{Sede} & \textbf{Total} \\
+\midrule
+babahoyo & 4.25 \\
+ventanas & 2.25 \\
+campus   & 4.25 \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+También se verificó la reconstrucción vertical mediante la vista \texttt{clientes\_global}, obteniendo un resultado de \texttt{clientes\_reconstruidos = 6}.
+
+\subsection{Disjunción}
+La disjunción significa que los datos no deben repetirse innecesariamente en varios fragmentos. Para comprobarlo, se buscó si algún \texttt{pedido\_id} aparecía más de una vez, obteniendo un resultado de \texttt{0 filas}. Esto confirma que ningún pedido está duplicado entre los nodos.
+
+\begin{figure}[htbp]
+\centering
+\includegraphics[width=\columnwidth]{figs/fig_verificacion.png}
+\caption{Verificación final de completitud, reconstrucción y disjunción ejecutada desde PowerShell mediante \texttt{docker exec}.}
+\label{fig:verificacion}
+\end{figure}
+
+\section{Reflexión}
+La práctica permitió comprender que una base de datos distribuida no consiste solamente en tener varias copias de una misma base, sino en organizar los datos de forma estratégica entre varios nodos. La fragmentación horizontal resultó fácil de entender porque separa los registros según una condición clara, en este caso la sede. La fragmentación vertical fue útil para observar cómo se pueden separar datos públicos y datos sensibles. La fragmentación mixta mostró que en un sistema real se pueden combinar varios criterios de distribución.
+
+Una dificultad encontrada fue la ejecución de scripts desde PowerShell, ya que el operador de redirección menor-que no funciona igual que en CMD o Linux. Para solucionarlo se utilizó \texttt{Get-Content} junto con \texttt{docker exec}. Otra dificultad fue comprender que algunos scripts debían ejecutarse por partes en nodos diferentes; esto se resolvió comentando y descomentando los bloques correspondientes según el nodo donde se ejecutaba.
+
+En general, la práctica ayudó a reforzar los conceptos de completitud, reconstrucción y disjunción. Estas tres condiciones son importantes porque permiten comprobar que la fragmentación no haya provocado pérdida de datos, duplicación incorrecta o imposibilidad de reconstruir la información original.
+
+\section{Conclusión}
+En conclusión, se logró implementar una base de datos distribuida usando PostgreSQL y Docker, aplicando fragmentación horizontal, vertical y mixta. La tabla \texttt{pedidos} fue distribuida por sede, la tabla \texttt{clientes} fue separada por tipo de información y posteriormente se combinó la distribución por ciudad y sensibilidad de los datos. Mediante \texttt{postgres\_fdw} se crearon vistas globales que permitieron reconstruir la información distribuida. Los resultados de verificación confirmaron que se cumplió con la completitud, la reconstrucción y la disjunción, por lo que la fragmentación aplicada fue correcta.
+
+\section*{Repositorio}
+El código fuente completo de la práctica, incluyendo los archivos \texttt{docker-compose.yml} y los scripts SQL, se encuentra disponible en el siguiente repositorio de GitHub:
+\begin{center}
+\url{https://github.com/ivillamarinc/practica-fragmentacion}
+\end{center}
+
+\end{document}
