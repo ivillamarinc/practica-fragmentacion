@@ -1,0 +1,30 @@
+services:
+  pg-campus:
+    image: postgres:16-alpine
+    container_name: pg-campus
+    environment:
+      POSTGRES_DB: cafeteria
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: admin123
+    ports:
+      - "5433:5432"
+
+  pg-babahoyo:
+    image: postgres:16-alpine
+    container_name: pg-babahoyo
+    environment:
+      POSTGRES_DB: cafeteria
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: admin123
+    ports:
+      - "5434:5432"
+
+  pg-ventanas:
+    image: postgres:16-alpine
+    container_name: pg-ventanas
+    environment:
+      POSTGRES_DB: cafeteria
+      POSTGRES_USER: admin
+      POSTGRES_PASSWORD: admin123
+    ports:
+      - "5435:5432"
